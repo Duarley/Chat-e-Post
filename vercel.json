@@ -1,0 +1,7 @@
+{
+  "version": 2,
+  "buildCommand": "node delete-app-dir.js && next build",
+  "cleanUrls": true,
+  "framework": "nextjs",
+  "outputDirectory": ".next"
+}

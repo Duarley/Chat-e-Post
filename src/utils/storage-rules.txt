@@ -1,0 +1,60 @@
+// Firebase Storage Security Rules for enhanced security
+// Copy these rules to your Firebase console
+
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Function to check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // Function to check if user is accessing their own data
+    function isOwner(userId) {
+      return request.auth.uid == userId;
+    }
+    
+    // Function to validate file metadata
+    function isValidFile() {
+      return request.resource.size < 10 * 1024 * 1024 // 10MB max
+          && request.resource.contentType.matches('image/.*|audio/.*|video/.*|application/pdf')
+          && request.resource.contentType != 'application/x-msdownload'
+          && request.resource.contentType != 'application/x-msdos-program'
+          && request.resource.contentType != 'application/x-javascript'
+          && request.resource.contentType != 'application/x-shockwave-flash';
+    }
+    
+    // Profile pictures
+    match /profilePictures/{userId} {
+      // Anyone can read profile pictures
+      allow read: if isAuthenticated();
+      // Only the user can upload their own profile picture
+      allow write: if isOwner(userId) && isValidFile();
+    }
+    
+    // Post images
+    match /posts/{postId}/{fileName} {
+      // Anyone can read post images
+      allow read: if isAuthenticated();
+      // Only the post owner can upload images
+      allow write: if isAuthenticated() && isValidFile();
+    }
+    
+    // Chat files
+    match /chats/{roomId}/{fileName} {
+      // Only chat participants can read chat files
+      allow read: if isAuthenticated() && 
+                   exists(/databases/$(database)/documents/chatRooms/$(roomId)/participants/$(request.auth.uid));
+      
+      // Only chat participants can upload files
+      allow write: if isAuthenticated() && 
+                    exists(/databases/$(database)/documents/chatRooms/$(roomId)/participants/$(request.auth.uid)) &&
+                    isValidFile();
+    }
+    
+    // Prevent access to all other files
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -1,0 +1,94 @@
+// Firestore Security Rules for enhanced security
+// Copy these rules to your Firebase console
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Function to check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // Function to check if user is accessing their own data
+    function isOwner(userId) {
+      return request.auth.uid == userId;
+    }
+    
+    // Function to validate post content
+    function isValidPost(post) {
+      return post.size() <= 10 * 1024 * 1024 // 10MB max
+        && post.text is string
+        && post.text.size() <= 5000 // 5000 chars max
+        && post.userId is string
+        && post.userId == request.auth.uid
+        && post.createdAt is timestamp;
+    }
+    
+    // Function to validate message content
+    function isValidMessage(message) {
+      return message.size() <= 10 * 1024 * 1024 // 10MB max
+        && (message.text is string || message.text == null)
+        && (message.text == null || message.text.size() <= 2000) // 2000 chars max
+        && message.senderId is string
+        && message.senderId == request.auth.uid
+        && message.createdAt is timestamp;
+    }
+    
+    // Users collection
+    match /users/{userId} {
+      // Anyone can read basic user profiles
+      allow read: if isAuthenticated();
+      // Only the user can write their own data
+      allow write: if isOwner(userId);
+      
+      // Prevent deletion of user documents
+      allow delete: if false;
+    }
+    
+    // Posts collection
+    match /posts/{postId} {
+      // Anyone can read posts
+      allow read: if isAuthenticated();
+      // Only the post owner can create/update their posts
+      allow create: if isValidPost(request.resource.data);
+      allow update: if isOwner(resource.data.userId) && isValidPost(request.resource.data);
+      allow delete: if isOwner(resource.data.userId);
+    }
+    
+    // Chat rooms collection
+    match /chatRooms/{roomId} {
+      // Only participants can access the chat room
+      allow read: if isAuthenticated() && 
+                   resource.data.participants.hasAny([request.auth.uid]);
+      
+      // Allow creation if the user is a participant
+      allow create: if isAuthenticated() && 
+                     request.resource.data.participants.hasAny([request.auth.uid]);
+      
+      // Allow updates if the user is a participant
+      allow update: if isAuthenticated() && 
+                     resource.data.participants.hasAny([request.auth.uid]);
+      
+      // Prevent deletion of chat rooms
+      allow delete: if false;
+      
+      // Messages subcollection
+      match /messages/{messageId} {
+        // Only participants can read messages
+        allow read: if isAuthenticated() && 
+                     get(/databases/$(database)/documents/chatRooms/$(roomId)).data.participants.hasAny([request.auth.uid]);
+        
+        // Only participants can create messages
+        allow create: if isAuthenticated() && 
+                       get(/databases/$(database)/documents/chatRooms/$(roomId)).data.participants.hasAny([request.auth.uid]) &&
+                       isValidMessage(request.resource.data);
+        
+        // Prevent updates to messages
+        allow update: if false;
+        
+        // Prevent deletion of messages
+        allow delete: if false;
+      }
+    }
+  }
+}
